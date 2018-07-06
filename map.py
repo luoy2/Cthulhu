@@ -1,25 +1,9 @@
-# shogan 需要找到最短的路径移动到下一个gate
-import constants
-import collections
+import queue
+import logging
+from enum import Enum
 
-class Queue:
-    def __init__(self):
-        self.elements = collections.deque()
-
-    def empty(self):
-        return len(self.elements) == 0
-
-    def put(self, x):
-        self.elements.append(x)
-
-    def get(self):
-        return self.elements.popleft()
-
-
-class Gate(object):
-    def __init__(self, region, seal):
-        self.region = region
-        self.seal = seal
+from constants import Region
+import awakening_rituals
 
 
 class Location(object):
@@ -33,47 +17,46 @@ class Location(object):
         self.gate = gate
         self.train_station = train_station
         self.open = 1
+        self.logger = logging.getLogger('Location log')
 
     def __repr__(self):
         return self.name
 
-
     def get_location_by_step(self, step=1):
-        avaliable_location = []
+        available_locations = []
         if step == 1:
             return self.connected_locations
         else:
             for i in self.connected_locations:
-                avaliable_location += i.get_location_by_step(step-1)
-            return list(set(avaliable_location))
+                available_locations += i.get_location_by_step(step-1)
+            return list(set(available_locations))
 
-
-    def _calculate_distance(self, location):
-        pass
-
+    def calculate_distance(self, destination):
+        return self.get_result_dict_to_destination(destination)['steps']
 
     def get_path_to_open_gate(self):
-        frontier = Queue()
+        return self.get_result_dict_to_destination(open_gate=True)['path']
+
+    def get_result_dict_to_destination(self, destination=None, open_gate=False):
+        frontier = queue.Queue()
         frontier.put(self)
-        came_from = {}
-        came_from[self] = None
+        came_from = {self: None}
 
         while not frontier.empty():
             current = frontier.get()
-            # print(current)
-
-            if current.open*current.gate:
-                # print(current)
+            if destination and current.name == destination.name:
                 break
+            elif open_gate and current.open*current.gate:
+                break
+            else:
+                self.logger.info('Incorrect setting. Could not find path.')
 
-            for next in current.connected_locations:
-                # print(f'visiting connected location {next}')
-                if next not in came_from:
-                    frontier.put(next)
-                    came_from[next] = current
+            for next_location in current.connected_locations:
+                if next_location not in came_from:
+                    frontier.put(next_location)
+                    came_from[next_location] = current
 
-        ordered_loc = []
-        ordered_loc.append(current)
+        ordered_loc = [current]
         while came_from[current]:
             before = came_from[current]
             ordered_loc.append(before)
@@ -83,128 +66,116 @@ class Location(object):
                        'path':[i for i in reversed(ordered_loc)]}
         return result_dict
 
+    def check_cult_status(self):
+        if self._cultist_num > 3:
+            awakening_rituals.start()
 
-
-    def add_cult(self, num):
+    def add_cultist(self, num):
         self._cultist_num += num
+        self.check_cult_status()
 
-
-    def add_shog(self, num):
+    def add_shoggoth(self, num):
         self._shoggoth_num += num
 
-
-    def get_cult(self):
+    def get_cultist(self):
         return self._cultist_num
 
-
-    def get_shog(self):
+    def get_shoggoth(self):
         return self._shoggoth_num
 
+    def clear_cultist(self):
+        self._cultist_num = 0
 
     def seal_gate(self):
         if self.gate:
             self.open = 0
 
 
-# class MapGraph(object):
-#     def __init__(self):
-#         self.edges = {}
-#
-#     def neighbors(self, location):
-#         return self.edges[location]
+class Locations(Enum):
+    # Green region
+    Train_Station = Location(name='Train Station', region=Region.GREEN, train_station=1)
+    University = Location(name='University', region=Region.GREEN)
+    Park = Location(name='Park', region=Region.GREEN, gate=1)
+    Police_Station = Location(name='Police Station', region=Region.GREEN)
+    Secret_Lodge = Location(name='Secret Lodge', region=Region.GREEN)
+    Diner = Location(name='Diner', region=Region.GREEN, train_station=1)
+
+    # Yellow region
+    Cafe = Location(name='Cafe', region=Region.YELLOW)
+    Old_Mill = Location(name='Old Mill', region=Region.YELLOW, gate=1)
+    Church = Location(name='Church', region=Region.YELLOW)
+    Farmstead = Location(name='Farmstead', region=Region.YELLOW)
+    Historic_Inn = Location(name='Historic Inn', region=Region.YELLOW, train_station=1)
+    Swamp = Location(name='Swamp', region=Region.YELLOW)
+
+    # Blue region
+    Junkyard = Location(name='Junkyard', region=Region.BLUE)
+    Pawn_Shop = Location(name='Pawn Shop', region=Region.BLUE)
+    Hospital = Location(name='Hospital', region=Region.BLUE, gate=1)
+    Factory = Location(name='Factory', region=Region.BLUE, train_station=1)
+    Broadwalk = Location(name='Broadwalk', region=Region.BLUE)
+    Docks = Location(name='Docks', region=Region.BLUE)
+
+    # Red region
+    Woods = Location(name='Woods', region=Region.RED)
+    Market = Location(name='Market', region=Region.RED, train_station=1)
+    Wharf = Location(name='Wharf', region=Region.RED)
+    Theater = Location(name='Theater', region=Region.RED)
+    Graveyard = Location(name='Graveyard', region=Region.RED, gate=1)
+    Great_Hall = Location(name='Great Hall', region=Region.RED)
+
+
+class Map(object):
+    def __init__(self):
+        self.locations = Locations
+        self.logger = logging.getLogger('Map logger')
+
+    def set_up_location_connections(self):
+        self.locations.Train_Station.connected_locations = [self.locations.University, self.locations.Cafe]
+        self.locations.University.connected_locations = \
+            [self.locations.Park, self.locations.Train_Station, self.locations.Police_Station]
+        self.locations.Park.connected_locations = \
+            [self.locations.University, self.locations.Police_Station, self.locations.Secret_Lodge]
+        self.locations.Police_Station.connected_locations = \
+            [self.locations.University, self.locations.Park, self.locations.Secret_Lodge]
+        self.locations.Secret_Lodge.connected_locations = \
+            [self.locations.Park, self.locations.Police_Station, self.locations.Diner]
+        self.locations.Diner.connected_locations = [self.locations.Secret_Lodge, self.locations.Junkyard]
+
+        self.locations.Junkyard.connected_locations = [self.locations.Diner, self.locations.Pawn_Shop]
+        self.locations.Pawn_Shop.connected_locations = \
+            [self.locations.Junkyard, self.locations.Hospital, self.locations.Factory]
+        self.locations.Hospital.connected_locations = [self.locations.Pawn_Shop, self.locations.Factory]
+        self.locations.Factory.connected_locations = \
+            [self.locations.Hospital, self.locations.Pawn_Shop, self.locations.Broadwalk, self.locations.Theater]
+        self.locations.Broadwalk.connected_locations = [self.locations.Factory, self.locations.Docks]
+        self.locations.Docks.connected_locations = [self.locations.Broadwalk, self.locations.Woods]
+
+        self.locations.Woods.connected_locations = \
+            [self.locations.Docks, self.locations.Market, self.locations.Great_Hall]
+        self.locations.Market.connected_locations = \
+            [self.locations.Woods, self.locations.Great_Hall, self.locations.Wharf]
+        self.locations.Wharf.connected_locations = [self.locations.Market, self.locations.Graveyard]
+        self.locations.Graveyard.connected_locations = [self.locations.Wharf]
+        self.locations.Theater.connected_locations = [self.locations.Market]
+        self.locations.Great_Hall.connected_locations = \
+            [self.locations.Woods, self.locations.Market, self.locations.Swamp]
+
+        self.locations.Swamp.connected_locations = [self.locations.Great_Hall, self.locations.Farmstead]
+        self.locations.Farmstead.connected_locations = \
+            [self.locations.Historic_Inn, self.locations.Church, self.locations.Swamp]
+        self.locations.Historic_Inn.connected_locations = [self.locations.Church, self.locations.Farmstead]
+        self.locations.Church.connected_locations = \
+            [self.locations.Old_Mill, self.locations.Historic_Inn, self.locations.Farmstead]
+        self.locations.Cafe.connected_locations = [self.locations.Church, self.locations.Train_Station]
+        self.locations.Old_Mill.connected_locations = [self.locations.Church]
+
+    def get_location_by_name(self, location_name):
+        result_list = [loc for loc in self.locations if loc.name == location_name]
+        if len(result_list) != 1:
+            self.logger.info('Unable to get location.')
+        else:
+            return result_list[0].value
 
 
 
-
-
-# green region
-Train_Station = Location(name='Train Station', region=constants.GREEN, train_station=1)
-University = Location(name='University', region=constants.GREEN)
-Park = Location(name='Park',region=constants.GREEN, gate=1)
-Police_Station = Location(name='Police Station', region=constants.GREEN)
-Secret_Lodge = Location(name='Secret Lodge', region=constants.GREEN)
-Diner = Location(name='Diner', region=constants.GREEN, train_station=1)
-
-#yellow region
-Cafe = Location(name='Cafe', region=constants.YELLOW)
-Old_Mill = Location(name='Old Mill', region=constants.YELLOW, gate=1)
-Church = Location(name='Church', region=constants.YELLOW)
-Farmstead = Location(name='Farmstead', region=constants.YELLOW)
-Historic_Inn = Location(name='Historic Inn', region=constants.YELLOW, train_station=1)
-Swamp = Location(name='Swamp', region=constants.YELLOW)
-
-
-#blue region
-Junkyard = Location(name='Junkyard', region=constants.BLUE)
-Pawn_Shop = Location(name='Pawn Shop', region=constants.BLUE)
-Hospital = Location(name='Hospital', region=constants.BLUE, gate=1)
-Factory = Location(name='Factory', region=constants.BLUE, train_station=1)
-Broadwalk = Location(name='Broadwalk', region=constants.BLUE)
-Docks = Location(name='Docks', region=constants.BLUE)
-
-
-#red region
-Woods = Location(name='Woods', region=constants.RED)
-Market = Location(name='Market', region=constants.RED, train_station=1)
-Wharf = Location(name='Wharf', region=constants.RED)
-Theater = Location(name='Theater', region=constants.RED)
-Graveyard = Location(name='Graveyard', region=constants.RED, gate=1)
-Great_Hall = Location(name='Great Hall', region=constants.RED)
-
-
-# Main_Map = MapGraph()
-# Main_Map.edges = {
-#     Train_Station: [University, Park],
-#     University: [Park, Train_Station, Police_Station],
-#     Park: [University, Police_Station, Secret_Lodge],
-#     Police_Station: [University, Park, Secret_Lodge],
-#     Secret_Lodge: [Park, Police_Station, Diner],
-#     Diner: [Secret_Lodge, Junkyard],
-#     Junkyard: [Diner, Pawn_Shop],
-#     Pawn_Shop: [Junkyard, Hospital, Factory],
-#     Hospital: [Pawn_Shop, Factory],
-#     Factory: [Hospital, Pawn_Shop, Broadwalk],
-#     Broadwalk: [Factory, Docks],
-#     Docks: [Broadwalk, Woods],
-#     Woods: [Docks, Market, Great_Hall],
-#     Market: [Woods, Great_Hall, Wharf, Theater],
-#     Wharf: [Market, Graveyard],
-#     Graveyard: [Wharf],
-#     Theater: [Market],
-#     Great_Hall: [Woods, Market, Swamp],
-#     Swamp: [Great_Hall, Farmstead],
-#     Farmstead: [Historic_Inn, Church, Swamp],
-#     Historic_Inn: [Church, Farmstead],
-#     Church: [Old_Mill, Historic_Inn, Farmstead, Cafe],
-#     Cafe: [Church, Train_Station],
-#     Old_Mill: [Church]
-# }
-
-
-Train_Station.connected_locations = [University, Cafe]
-University.connected_locations = [Park, Train_Station, Police_Station]
-Park.connected_locations = [University, Police_Station, Secret_Lodge]
-Police_Station.connected_locations = [University, Park, Secret_Lodge]
-Secret_Lodge.connected_locations = [Park, Police_Station, Diner]
-Diner.connected_location = [Secret_Lodge, Junkyard]
-
-Junkyard.connected_location = [Diner, Pawn_Shop]
-Pawn_Shop.connected_location = [Junkyard, Hospital, Factory]
-Hospital.connected_location = [Pawn_Shop, Factory]
-Factory.connected_location = [Hospital, Pawn_Shop, Broadwalk, Theater]
-Broadwalk.connected_location = [Factory, Docks]
-Docks.connected_locations = [Broadwalk, Woods]
-
-Woods.connected_location = [Docks, Market, Great_Hall]
-Market.connected_location = [Woods, Great_Hall, Wharf]
-Wharf.connected_location = [Market, Graveyard]
-Graveyard.connected_location = [Wharf]
-Theater.connected_location = [Market]
-Great_Hall.connected_location = [Woods, Market, Swamp]
-
-Swamp.connected_locations = [Great_Hall, Farmstead]
-Farmstead.connected_locations = [Historic_Inn, Church, Swamp]
-Historic_Inn.connected_locations = [Church, Farmstead]
-Church.connected_locations = [Old_Mill, Historic_Inn, Farmstead]
-Cafe.connected_locations = [Church, Train_Station]
-Old_Mill.connected_locations = [Church]
